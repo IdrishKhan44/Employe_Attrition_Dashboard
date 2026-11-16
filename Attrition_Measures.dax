@@ -1,0 +1,88 @@
+// ============================================================
+// Employee Attrition - DAX Measure Library
+// Table: Employees. Create a table "_Measures" (Enter Data, blank) and store all measures there.
+// Every measure is filter-context aware (slicers, axes, cross-filtering).
+// ============================================================
+
+// ---------- Core KPIs ----------
+Total Employees  = COUNTROWS ( Employees )
+Employees Left   = CALCULATE ( COUNTROWS ( Employees ), Employees[Attrition] = "Yes" )
+Active Employees = [Total Employees] - [Employees Left]
+Attrition Rate   = DIVIDE ( [Employees Left], [Total Employees] )
+Retention Rate   = 1 - [Attrition Rate]
+Average Age      = AVERAGE ( Employees[Age] )
+Average Monthly Income = AVERAGE ( Employees[MonthlyIncome] )
+Average Tenure   = AVERAGE ( Employees[YearsAtCompany] )
+
+// ---------- Left vs Stayed comparisons ----------
+Avg Income - Left   = CALCULATE ( AVERAGE ( Employees[MonthlyIncome] ), Employees[Attrition] = "Yes" )
+Avg Income - Stayed = CALCULATE ( AVERAGE ( Employees[MonthlyIncome] ), Employees[Attrition] = "No" )
+Median Income - Left   = CALCULATE ( MEDIAN ( Employees[MonthlyIncome] ), Employees[Attrition] = "Yes" )
+Median Income - Stayed = CALCULATE ( MEDIAN ( Employees[MonthlyIncome] ), Employees[Attrition] = "No" )
+Median Tenure - Left   = CALCULATE ( MEDIAN ( Employees[YearsAtCompany] ), Employees[Attrition] = "Yes" )
+Median Tenure - Stayed = CALCULATE ( MEDIAN ( Employees[YearsAtCompany] ), Employees[Attrition] = "No" )
+
+// ---------- Benchmarks ----------
+// Company rate ignoring ALL filters - the fixed yardstick for comparisons
+Company Attrition Rate = CALCULATE ( [Attrition Rate], REMOVEFILTERS ( Employees ) )
+Variance vs Company (pp) = ( [Attrition Rate] - [Company Attrition Rate] ) * 100
+// 1.0 = same as company. 2.0 = twice the company rate.
+Attrition Index = DIVIDE ( [Attrition Rate], [Company Attrition Rate] )
+
+// ---------- Department / Role (respect all other slicers, ignore only the axis) ----------
+Department Attrition Rate = CALCULATE ( [Attrition Rate], ALLEXCEPT ( Employees, Employees[Department] ) )
+Job Role Attrition Rate   = CALCULATE ( [Attrition Rate], ALLEXCEPT ( Employees, Employees[JobRole] ) )
+// NOTE: ALLEXCEPT ignores other slicers. For slicer-responsive rates on charts, use [Attrition Rate]
+// directly with Department / JobRole on the axis. Use these two only as fixed reference values.
+
+Share of All Leavers =
+DIVIDE ( [Employees Left], CALCULATE ( [Employees Left], REMOVEFILTERS ( Employees ) ) )
+
+// ---------- Overtime ----------
+Overtime Attrition Rate = CALCULATE ( [Attrition Rate], Employees[OverTime] = "Yes" )
+No-Overtime Attrition Rate = CALCULATE ( [Attrition Rate], Employees[OverTime] = "No" )
+Overtime Multiple = DIVIDE ( [Overtime Attrition Rate], [No-Overtime Attrition Rate] )
+
+// ---------- Satisfaction ----------
+Low Job Satisfaction Attrition Rate =
+CALCULATE ( [Attrition Rate], Employees[JobSatisfaction] <= 2 )
+High Job Satisfaction Attrition Rate =
+CALCULATE ( [Attrition Rate], Employees[JobSatisfaction] >= 3 )
+Low Environment Satisfaction Attrition Rate =
+CALCULATE ( [Attrition Rate], Employees[EnvironmentSatisfaction] <= 2 )
+Low Work-Life Balance Attrition Rate =
+CALCULATE ( [Attrition Rate], Employees[WorkLifeBalance] <= 2 )
+
+// ---------- Data-quality / privacy guard ----------
+// Hide or grey out rates for tiny groups (also protects privacy)
+Min Group Size = 10
+Low Sample Flag = IF ( [Total Employees] < [Min Group Size], "Low sample (n<10)", BLANK () )
+Attrition Rate (Safe) = IF ( [Total Employees] >= [Min Group Size], [Attrition Rate] )
+Low Sample Warning = IF ( [Total Employees] < 30, "Small group (n=" & [Total Employees] & "). Interpret with caution.", "" )
+
+// ---------- Dynamic titles (Title > fx > Field value) ----------
+Title - Attrition by Department =
+"Attrition Rate by Department  |  " & FORMAT ( [Attrition Rate], "0.0%" ) & " overall in current selection"
+Title - Attrition by Job Role =
+"Attrition by Job Role  |  " & FORMAT ( [Employees Left], "#,0" ) & " of " & FORMAT ( [Total Employees], "#,0" ) & " employees left"
+Title - Selection Summary =
+VAR d = SELECTEDVALUE ( Employees[Department], "All Departments" )
+RETURN d & "  |  " & FORMAT ( [Total Employees], "#,0" ) & " employees  |  " & FORMAT ( [Attrition Rate], "0.0%" ) & " attrition"
+
+// ---------- Conditional formatting (Format > fx > Field value) ----------
+// Red scale vs company benchmark. Returns hex colour.
+Attrition Colour =
+VAR idx = [Attrition Index]
+RETURN
+    SWITCH ( TRUE (),
+        ISBLANK ( idx ), "#E5E7EB",
+        idx >= 2,   "#DC3545",   // 2x company rate or more
+        idx >= 1.25, "#F08A93",  // clearly above
+        idx >= 0.75, "#F5F7FB",  // near company rate
+        "#B7E1C9"                // clearly below
+    )
+
+// ---------- Row-level security (Modeling > Manage roles), example static role ----------
+// Table: Employees   Filter: [Department] = "Sales"
+// Dynamic variant needs a user-to-department table:
+// [Department] = LOOKUPVALUE ( UserAccess[Department], UserAccess[Email], USERPRINCIPALNAME () )
